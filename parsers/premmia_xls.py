@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import csv
 from pathlib import Path
 
 from constants import empty_categories
@@ -29,7 +28,7 @@ def _rows_from_xls(path: str | Path) -> list[dict[str, object]]:
     try:
         import xlrd
     except ImportError as exc:
-        raise RuntimeError("Instale xlrd para importar o arquivo Premmia .xls.") from exc
+        raise RuntimeError("A dependencia xlrd nao esta instalada. Execute: pip install -r requirements.txt") from exc
 
     book = xlrd.open_workbook(path)
     if "Conferência" in book.sheet_names():
@@ -60,14 +59,6 @@ def _rows_from_xls(path: str | Path) -> list[dict[str, object]]:
     return records
 
 
-def _rows_from_csv(path: str | Path) -> list[dict[str, object]]:
-    with open(path, "r", encoding="utf-8-sig", newline="") as handle:
-        sample = handle.read(2048)
-        handle.seek(0)
-        dialect = csv.Sniffer().sniff(sample, delimiters=";,")
-        return list(csv.DictReader(handle, dialect=dialect))
-
-
 def _get(record: dict[str, object], wanted: str) -> object:
     wanted_norm = normalize_text(wanted)
     for key, value in record.items():
@@ -78,7 +69,9 @@ def _get(record: dict[str, object], wanted: str) -> object:
 
 def parse_premmia_file(path: str | Path) -> dict[str, object]:
     formato = detectar_formato_premmia(path)
-    records = _rows_from_xls(path) if formato == "xls" else _rows_from_csv(path)
+    if formato != "xls":
+        raise ValueError("O relatorio Premmia deve ser um arquivo Excel .xls valido.")
+    records = _rows_from_xls(path)
     categorias = empty_categories()
     processed = 0
     ignored = 0

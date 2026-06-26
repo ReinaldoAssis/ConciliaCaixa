@@ -4,7 +4,6 @@ CATEGORIES = [
     "PREMMIA_CARTAO",
     "PREMMIA_PIX",
     "PREMMIA_CUPOM",
-    "CARTAO_FITCARD",
     "FITCARD",
     "PAG_PIX",
     "ELO_CREDITO",
@@ -19,7 +18,6 @@ CATEGORY_LABELS = {
     "PREMMIA_CARTAO": "PREMMIA CARTAO",
     "PREMMIA_PIX": "PREMMIA PIX",
     "PREMMIA_CUPOM": "PREMMIA CUPOM",
-    "CARTAO_FITCARD": "CARTAO FITCARD",
     "FITCARD": "FITCARD",
     "PAG_PIX": "PAG PIX",
     "ELO_CREDITO": "ELO CREDITO",
@@ -37,7 +35,26 @@ def empty_categories() -> dict[str, dict[str, float]]:
     return {key: {"sistema": 0.0, "site": 0.0} for key in CATEGORIES}
 
 
+def normalize_categories(categorias: dict[str, dict[str, float]] | None) -> dict[str, dict[str, float]]:
+    normalized = empty_categories()
+    for key, values in (categorias or {}).items():
+        if key == "CARTAO_FITCARD":
+            target = "FITCARD"
+        elif key in normalized:
+            target = key
+        else:
+            continue
+        normalized[target]["sistema"] = round(
+            normalized[target]["sistema"] + float((values or {}).get("sistema", 0) or 0), 2
+        )
+        normalized[target]["site"] = round(
+            normalized[target]["site"] + float((values or {}).get("site", 0) or 0), 2
+        )
+    return normalized
+
+
 def build_conciliation_rows(categorias: dict[str, dict[str, float]]) -> list[dict[str, object]]:
+    categorias = normalize_categories(categorias)
     rows = []
     for key in CATEGORIES:
         values = categorias.get(key, {})

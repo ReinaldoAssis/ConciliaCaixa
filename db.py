@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
-from constants import empty_categories, totals
+from constants import empty_categories, normalize_categories, totals
 from utils import db_path
 
 
@@ -67,6 +67,7 @@ class CaixaRepository:
         normalized = dict(caixa)
         normalized.setdefault("status", "rascunho")
         normalized.setdefault("categorias", empty_categories())
+        normalized["categorias"] = normalize_categories(normalized["categorias"])
         normalized.setdefault("fitcard_total", 0.0)
         normalized.setdefault("sangria", 0.0)
         normalized.setdefault("notas_a_prazo", 0.0)

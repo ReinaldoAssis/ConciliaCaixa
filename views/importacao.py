@@ -70,7 +70,7 @@ class ImportFrame(ttk.Frame):
         self.premmia_status = self._file_section(
             "premmia",
             "E - Relatorio Premmia (XLS)",
-            lambda: self._choose_file("premmia", parse_premmia_file, [("Premmia", "*.xls *.csv"), ("Todos", "*.*")]),
+            lambda: self._choose_file("premmia", parse_premmia_file, [("Premmia XLS", "*.xls *.XLS")]),
         )
 
         self.count_frame = MoneyCountFrame(self.body)
@@ -208,7 +208,7 @@ class ImportFrame(ttk.Frame):
         if not text:
             self.fitcard_ok.set("")
             self.caixa["fitcard_total"] = 0.0
-            self.caixa["categorias"]["CARTAO_FITCARD"]["site"] = 0.0
+            self.caixa["categorias"]["FITCARD"]["site"] = 0.0
             return
         try:
             value = parse_money(text)
@@ -217,9 +217,7 @@ class ImportFrame(ttk.Frame):
             return
         self.fitcard_ok.set("✓ valor valido")
         self.caixa["fitcard_total"] = value
-        self.caixa["categorias"]["CARTAO_FITCARD"]["site"] = value
-        if not self.caixa["categorias"]["FITCARD"]["sistema"]:
-            self.caixa["categorias"]["FITCARD"]["sistema"] = value
+        self.caixa["categorias"]["FITCARD"]["site"] = value
 
     def _collect_common(self, status: str) -> bool:
         try:
