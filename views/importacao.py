@@ -70,7 +70,7 @@ class ImportFrame(ttk.Frame):
         self.premmia_status = self._file_section(
             "premmia",
             "E - Relatorio Premmia (XLS)",
-            lambda: self._choose_file("premmia", parse_premmia_file, [("Premmia XLS", "*.xls *.XLS")]),
+            lambda: self._choose_file("premmia", parse_premmia_file, [("Premmia", "*.xls *.XLS *.csv *.CSV"), ("Todos", "*.*")]),
         )
 
         self.count_frame = MoneyCountFrame(self.body)
@@ -176,9 +176,9 @@ class ImportFrame(ttk.Frame):
 
     def _merge_categories(self, incoming: dict, side: str, replace: bool) -> None:
         for key in CATEGORIES:
-            if replace:
-                self.caixa["categorias"][key][side] = 0.0
             value = float((incoming.get(key) or {}).get(side, 0) or 0)
+            if replace and value:
+                self.caixa["categorias"][key][side] = 0.0
             if value:
                 self.caixa["categorias"][key][side] = round(self.caixa["categorias"][key][side] + value, 2)
 
