@@ -6,7 +6,7 @@ from tkinter import messagebox, ttk
 from uuid import uuid4
 
 from constants import DENOMINATIONS
-from utils import format_money, parse_money, serials_valid
+from utils import copy_image_to_clipboard, format_money, parse_money, serials_valid
 
 
 class MoneyCountFrame(ttk.LabelFrame):
@@ -19,6 +19,8 @@ class MoneyCountFrame(ttk.LabelFrame):
         footer = ttk.Frame(self)
         footer.pack(fill="x", pady=(8, 0))
         ttk.Button(footer, text="+ Nova Contagem", command=self.add_count).pack(side="left")
+        self.copy_img_btn = ttk.Button(footer, text="Copiar Imagem", command=self._copy_image)
+        self.copy_img_btn.pack(side="left", padx=8)
         self.total_var = tk.StringVar(value=format_money(0))
         ttk.Label(footer, textvariable=self.total_var, font=("", 11, "bold")).pack(side="right")
         ttk.Label(footer, text="Total das contagens:").pack(side="right", padx=(0, 8))
@@ -168,3 +170,77 @@ class MoneyCountFrame(ttk.LabelFrame):
             except Exception:
                 pass
         self.total_var.set(format_money(total))
+
+    def _copy_image(self) -> None:
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+        except ImportError:
+            messagebox.showerror("Erro", "Instale pillow para gerar a imagem: pip install pillow")
+            return
+
+        counts = self.get_counts()
+        if not counts:
+            messagebox.showwarning("Sem dados", "Nenhuma contagem registrada.")
+            return
+
+        totals: dict[str, int] = {}
+        grand_total = 0.0
+        for c in counts:
+            for denom in DENOMINATIONS:
+                qty = int(c.get("notas", {}).get(str(denom), 0) or 0)
+                totals[str(denom)] = totals.get(str(denom), 0) + qty
+                grand_total += qty * denom
+            grand_total += c.get("moedas", 0) or 0
+
+        row_h = 28
+        pad = 16
+        header_h = 48
+        width = 340
+        height = header_h + len(DENOMINATIONS) * row_h + 3 * row_h + pad * 2
+
+        img = Image.new("RGB", (width, height), "#ffffff")
+        draw = ImageDraw.Draw(img)
+        try:
+            font_title = ImageFont.truetype("arial.ttf", 18)
+            font_body = ImageFont.truetype("arial.ttf", 14)
+            font_bold = ImageFont.truetype("arialbd.ttf", 14)
+        except Exception:
+            font_title = ImageFont.load_default()
+            font_body = ImageFont.load_default()
+            font_bold = ImageFont.load_default()
+
+        y = pad
+        draw.text((pad, y), "Contagem de Dinheiro", fill="#212529", font=font_title)
+        draw.line([(pad, y + 26), (width - pad, y + 26)], fill="#dee2e6", width=1)
+
+        y = header_h
+        col_w = (width - pad * 2) // 3
+        for col, text in enumerate(["Cedula", "Qtde.", "Subtotal"]):
+            x = pad + col * col_w
+            draw.text((x + (col_w // 2) - 20, y), text, fill="#6c757d", font=font_bold)
+
+        y += row_h
+        draw.line([(pad, y), (width - pad, y)], fill="#dee2e6", width=1)
+
+        for denom in DENOMINATIONS:
+            qty = totals.get(str(denom), 0)
+            subtotal = qty * denom
+            texts = [f"R$ {denom}", str(qty), format_money(subtotal)]
+            for col, text in enumerate(texts):
+                x = pad + col * col_w
+                draw.text((x + (col_w // 2) - 20, y + 4), text, fill="#212529", font=font_body)
+            y += row_h
+
+        draw.line([(pad, y), (width - pad, y)], fill="#dee2e6", width=1)
+        y += 4
+        draw.text((pad, y), "Total", fill="#212529", font=font_bold)
+        draw.text((width - pad - 80, y), format_money(grand_total), fill="#0d6efd", font=font_bold)
+
+        success = copy_image_to_clipboard(img)
+        if success:
+            messagebox.showinfo("Copiado", "Imagem copiada para a area de transferencia.")
+        else:
+            messagebox.showinfo(
+                "Imagem gerada",
+                "Nao foi possivel copiar para o clipboard. Salve a visualizacao como captura de tela.",
+            )

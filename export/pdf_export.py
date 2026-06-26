@@ -67,20 +67,56 @@ def export_caixa_pdf(caixa: dict, output_path: str | Path) -> Path:
     contagens = caixa.get("contagens_dinheiro") or []
     if not contagens:
         story.append(Paragraph("Nenhuma contagem registrada.", styles["Normal"]))
-    for contagem in contagens:
-        story.append(Paragraph(contagem.get("label", "Contagem"), styles["Heading3"]))
-        rows = [["Cedula", "Quantidade", "Subtotal"]]
-        notas = contagem.get("notas", {})
-        for denom in DENOMINATIONS:
-            qty = int(notas.get(str(denom), 0) or 0)
-            rows.append([f"R$ {denom}", str(qty), format_money(qty * denom)])
-        rows.append(["Moedas", "", format_money(contagem.get("moedas", 0))])
-        rows.append(["Total", "", format_money(contagem.get("total", 0))])
-        story.append(Table(rows, hAlign="LEFT"))
-        serials = contagem.get("seriais_200") or []
-        if serials:
-            story.append(Paragraph("Seriais R$ 200: " + ", ".join(serials), styles["Normal"]))
-        story.append(Spacer(1, 0.2 * cm))
+    else:
+        for contagem in contagens:
+            story.append(Paragraph(contagem.get("label", "Contagem"), styles["Heading3"]))
+            rows = [["Cedula", "Quantidade", "Subtotal"]]
+            notas = contagem.get("notas", {})
+            for denom in DENOMINATIONS:
+                qty = int(notas.get(str(denom), 0) or 0)
+                rows.append([f"R$ {denom}", str(qty), format_money(qty * denom)])
+            rows.append(["Moedas", "", format_money(contagem.get("moedas", 0))])
+            rows.append(["Total", "", format_money(contagem.get("total", 0))])
+            tbl = Table(rows, hAlign="LEFT")
+            tbl.setStyle(TableStyle([
+                ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#adb5bd")),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e9ecef")),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
+            ]))
+            story.append(tbl)
+            serials = contagem.get("seriais_200") or []
+            if serials:
+                story.append(Paragraph("Seriais R$ 200: " + ", ".join(serials), styles["Normal"]))
+            story.append(Spacer(1, 0.2 * cm))
+
+        if len(contagens) > 1:
+            story.append(Spacer(1, 0.3 * cm))
+            story.append(Paragraph("Resumo Consolidado", styles["Heading3"]))
+            total_notes: dict[str, int] = {}
+            total_sum = 0.0
+            for contagem in contagens:
+                notas = contagem.get("notas", {})
+                for denom in DENOMINATIONS:
+                    qty = int(notas.get(str(denom), 0) or 0)
+                    total_notes[str(denom)] = total_notes.get(str(denom), 0) + qty
+                    total_sum += qty * denom
+                total_sum += contagem.get("moedas", 0) or 0
+            summary_rows = [["Cedula", "Quantidade Total", "Valor Total"]]
+            for denom in DENOMINATIONS:
+                qty = total_notes.get(str(denom), 0)
+                summary_rows.append([f"R$ {denom}", str(qty), format_money(qty * denom)])
+            summary_rows.append(["TOTAL GERAL", "", format_money(total_sum)])
+            summary_table = Table(summary_rows, hAlign="LEFT")
+            summary_table.setStyle(TableStyle([
+                ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#adb5bd")),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0d6efd")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+                ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
+            ]))
+            story.append(summary_table)
 
     def footer(canvas, document):
         canvas.saveState()

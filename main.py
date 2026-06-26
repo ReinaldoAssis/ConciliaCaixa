@@ -67,6 +67,24 @@ def main() -> None:
         root.destroy()
         return
     root.protocol("WM_DELETE_WINDOW", app.close)
+
+    import threading
+
+    from updater import check_for_updates, load_settings
+
+    settings = load_settings()
+    if settings.get("check_on_startup", True):
+
+        def _check():
+            update = check_for_updates(settings.get("repo", "ReinaldoAssis/ConciliaCaixa"))
+            if update:
+                root.after(0, lambda: messagebox.showinfo(
+                    "Atualizacao disponivel",
+                    f"Nova versao {update['version']} disponivel.\n\nAcesse:\n{update['url']}",
+                ))
+
+        threading.Thread(target=_check, daemon=True).start()
+
     root.mainloop()
 
 

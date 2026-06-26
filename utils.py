@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 import sys
+import tempfile
 from datetime import date, datetime
 from pathlib import Path
 
@@ -111,3 +113,45 @@ def serials_valid(serials: list[str], qty_200: int) -> bool:
     if len(serials) != qty_200:
         return False
     return all(re.fullmatch(r"\d{5}", serial or "") for serial in serials)
+
+
+def copy_image_to_clipboard(image) -> bool:
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        image.save(tmp, format="PNG")
+        tmp_path = tmp.name
+    try:
+        if sys.platform == "darwin":
+            applescript = (
+                f'set the clipboard to (read (POSIX file "{tmp_path}") as «class PNGf»)'
+            )
+            subprocess.run(["osascript", "-e", applescript], check=True, capture_output=True)
+            return True
+        elif os.name == "nt":
+            try:
+                import win32clipboard
+                from PIL import Image
+
+                img = Image.open(tmp_path)
+                output = tempfile.NamedTemporaryFile(suffix=".bmp", delete=False)
+                img.convert("RGB").save(output.name, "BMP")
+                output.close()
+                win32clipboard.OpenClipboard()
+                win32clipboard.EmptyClipboard()
+                win32clipboard.SetClipboardData(win32clipboard.CF_DIB, open(output.name, "rb").read()[14:])
+                win32clipboard.CloseClipboard()
+                try:
+                    os.unlink(output.name)
+                except OSError:
+                    pass
+                return True
+            except ImportError:
+                return False
+        else:
+            return False
+    except Exception:
+        return False
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass

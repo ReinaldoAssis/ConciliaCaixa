@@ -3,6 +3,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 
+from updater import CURRENT_VERSION, UpdateConfigDialog
 from utils import date_to_br, date_to_iso, format_money
 
 
@@ -15,7 +16,9 @@ class HistoryFrame(ttk.Frame):
         header = ttk.Frame(self)
         header.pack(fill="x")
         ttk.Label(header, text="CaixaPos", font=("", 20, "bold")).pack(side="left")
-        ttk.Label(header, text="v1.0").pack(side="left", padx=8)
+        version_label = ttk.Label(header, text=CURRENT_VERSION)
+        version_label.pack(side="left", padx=8)
+        ttk.Button(header, text="Atualizacoes", command=self._open_updater).pack(side="left", padx=6)
         ttk.Button(header, text="Novo Caixa", command=self.app.new_caixa).pack(side="right")
 
         filters = ttk.LabelFrame(self, text="Filtros", padding=10)
@@ -80,3 +83,6 @@ class HistoryFrame(ttk.Frame):
         selected = self.tree.selection()
         if selected:
             self.app.open_caixa(selected[0])
+
+    def _open_updater(self) -> None:
+        UpdateConfigDialog(self)
