@@ -1,0 +1,270 @@
+from __future__ import annotations
+
+import threading
+import tkinter as tk
+from copy import deepcopy
+from datetime import date
+from tkinter import filedialog, messagebox, ttk
+
+from constants import CATEGORIES, empty_categories
+from parsers import parse_caixa_csv, parse_pagbank_csv, parse_premmia_file
+from utils import date_to_br, date_to_iso, ensure_not_future, format_money, parse_date_input, parse_money
+from views.contagem import MoneyCountFrame
+
+
+class ImportFrame(ttk.Frame):
+    def __init__(self, master, app):
+        super().__init__(master)
+        self.app = app
+        self.caixa = self._new_model()
+        self.imported_paths: dict[str, str] = {}
+        self.readonly = False
+        self._build()
+
+    def _build(self) -> None:
+        canvas = tk.Canvas(self, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(self, orient="vertical", command=canvas.yview)
+        self.body = ttk.Frame(canvas, padding=14)
+        self.body.bind("<Configure>", lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=self.body, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        header = ttk.Frame(self.body)
+        header.pack(fill="x")
+        ttk.Button(header, text="Voltar ao Historico", command=self.app.show_history).pack(side="left")
+        self.title_var = tk.StringVar(value="Novo Caixa")
+        ttk.Label(header, textvariable=self.title_var, font=("", 18, "bold")).pack(side="left", padx=12)
+        self.reopen_btn = ttk.Button(header, text="Reabrir para edicao", command=self._reopen)
+        self.reopen_btn.pack(side="right")
+
+        data_box = ttk.LabelFrame(self.body, text="A - Data da Conciliacao", padding=10)
+        data_box.pack(fill="x", pady=10)
+        self.date_var = tk.StringVar()
+        ttk.Label(data_box, text="Data").pack(side="left")
+        ttk.Entry(data_box, textvariable=self.date_var, width=14).pack(side="left", padx=8)
+
+        self.caixa_status = self._file_section(
+            "caixa",
+            "B - Relatorio do Sistema Interno (CAIXA CSV)",
+            lambda: self._choose_file("caixa", parse_caixa_csv, [("CSV", "*.csv"), ("Todos", "*.*")]),
+        )
+        self.pagbank_status = self._file_section(
+            "pagbank",
+            "C - Relatorio PagBank (CSV)",
+            lambda: self._choose_file("pagbank", parse_pagbank_csv, [("CSV", "*.csv"), ("Todos", "*.*")]),
+        )
+
+        fit_box = ttk.LabelFrame(self.body, text="D - FitCard", padding=10)
+        fit_box.pack(fill="x", pady=6)
+        ttk.Label(fit_box, text="Digite o valor total do FitCard (lado do site/adquirente)").pack(anchor="w")
+        row = ttk.Frame(fit_box)
+        row.pack(fill="x", pady=(6, 0))
+        self.fitcard_var = tk.StringVar()
+        ttk.Entry(row, textvariable=self.fitcard_var, width=16).pack(side="left")
+        self.fitcard_ok = tk.StringVar(value="")
+        ttk.Label(row, textvariable=self.fitcard_ok).pack(side="left", padx=8)
+        self.fitcard_var.trace_add("write", lambda *_args: self._apply_fitcard())
+
+        self.premmia_status = self._file_section(
+            "premmia",
+            "E - Relatorio Premmia (XLS)",
+            lambda: self._choose_file("premmia", parse_premmia_file, [("Premmia", "*.xls *.csv"), ("Todos", "*.*")]),
+        )
+
+        self.count_frame = MoneyCountFrame(self.body)
+        self.count_frame.pack(fill="both", expand=True, pady=10)
+
+        footer = ttk.Frame(self.body)
+        footer.pack(fill="x", pady=12)
+        ttk.Button(footer, text="Salvar Rascunho", command=self.save_draft).pack(side="left")
+        self.result_btn = ttk.Button(footer, text="Ver Resultado", command=self.show_result)
+        self.result_btn.pack(side="right")
+
+        self.progress = ttk.Progressbar(self.body, mode="indeterminate")
+        self.progress.pack(fill="x", pady=(0, 10))
+        self.progress.pack_forget()
+
+    def load_caixa(self, caixa: dict | None = None) -> None:
+        self.caixa = deepcopy(caixa) if caixa else self._new_model()
+        self.imported_paths = {}
+        self.readonly = self.caixa.get("status") == "conciliado"
+        self.date_var.set(date_to_br(self.caixa["data"]))
+        self.fitcard_var.set(str(self.caixa.get("fitcard_total", 0)).replace(".", ",") if self.caixa.get("fitcard_total") else "")
+        self.title_var.set("Caixa Conciliado" if self.readonly else "Caixa em Edicao")
+        self.count_frame.readonly = self.readonly
+        self.count_frame.set_counts(self.caixa.get("contagens_dinheiro", []))
+        self._set_status(self.caixa_status, "Importe o arquivo CAIXA CSV." if not caixa else "Dados do CAIXA carregados do registro.")
+        self._set_status(self.pagbank_status, "Importe o arquivo PagBank CSV." if not caixa else "Dados PagBank carregados do registro.")
+        self._set_status(self.premmia_status, "Importe o arquivo Premmia XLS." if not caixa else "Dados Premmia carregados do registro.")
+        self.reopen_btn.configure(state="normal" if self.readonly else "disabled")
+        self.result_btn.configure(state="normal" if caixa or self._has_system_data() else "disabled")
+
+    def save_draft(self) -> None:
+        if not self._collect_common("rascunho"):
+            return
+        if self._confirm_same_date():
+            self.app.repo.save(self.caixa)
+            messagebox.showinfo("Rascunho salvo", "O caixa foi salvo como rascunho.")
+            self.app.show_history()
+
+    def show_result(self) -> None:
+        if not self._has_system_data():
+            messagebox.showerror("CAIXA obrigatorio", "Importe o CSV do sistema interno antes de ver o resultado.")
+            return
+        if self._collect_common(self.caixa.get("status", "rascunho")):
+            self.app.show_result(self.caixa)
+
+    def _file_section(self, section: str, title: str, command):
+        box = ttk.LabelFrame(self.body, text=title, padding=10)
+        box.pack(fill="x", pady=6)
+        status = tk.StringVar(value="Nenhum arquivo importado.")
+        ttk.Label(box, textvariable=status, wraplength=820).pack(side="left", fill="x", expand=True)
+        ttk.Button(box, text="Selecionar Arquivo", command=command).pack(side="right", padx=4)
+        ttk.Button(box, text="Remover", command=lambda s=section, v=status: self._remove_import(s, v)).pack(side="right")
+        return status
+
+    def _choose_file(self, section: str, parser, filetypes) -> None:
+        if self.readonly:
+            messagebox.showinfo("Somente leitura", "Reabra o caixa para edicao antes de importar arquivos.")
+            return
+        path = filedialog.askopenfilename(filetypes=filetypes)
+        if not path:
+            return
+        if self.imported_paths.get(section) == path:
+            messagebox.showwarning("Arquivo repetido", "Este arquivo ja foi importado nesta secao.")
+            return
+        self.progress.pack(fill="x", pady=(0, 10))
+        self.progress.start(10)
+
+        def worker():
+            try:
+                result = parser(path)
+                self.after(0, lambda: self._apply_import(section, path, result))
+            except Exception as exc:
+                self.after(0, lambda: self._import_failed(str(exc)))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _apply_import(self, section: str, path: str, result: dict) -> None:
+        self.progress.stop()
+        self.progress.pack_forget()
+        self.imported_paths[section] = path
+        if section == "caixa":
+            self._merge_categories(result["categorias"], side="sistema", replace=True)
+            self.caixa["sangria"] = result["sangria"]
+            self.caixa["notas_a_prazo"] = result["notas_a_prazo"]
+            self.caixa["despesas"] = result["despesas"]
+            summary = f"{len(result['detected'])} itens detectados. Total: {format_money(result['total_saidas'])}"
+            self._set_status(self.caixa_status, summary)
+            self.result_btn.configure(state="normal")
+        elif section == "pagbank":
+            self._merge_categories(result["categorias"], side="site", replace=True)
+            summary = f"{result['registros_aprovados']} registros aprovados agrupados."
+            self._set_status(self.pagbank_status, summary)
+        elif section == "premmia":
+            self._merge_categories(result["categorias"], side="site", replace=True)
+            summary = f"Formato {result['formato'].upper()} detectado. {result['transacoes_processadas']} transacoes processadas."
+            self._set_status(self.premmia_status, summary)
+        self._apply_fitcard()
+
+    def _import_failed(self, message: str) -> None:
+        self.progress.stop()
+        self.progress.pack_forget()
+        messagebox.showerror("Erro de importacao", message)
+
+    def _merge_categories(self, incoming: dict, side: str, replace: bool) -> None:
+        for key in CATEGORIES:
+            if replace:
+                self.caixa["categorias"][key][side] = 0.0
+            value = float((incoming.get(key) or {}).get(side, 0) or 0)
+            if value:
+                self.caixa["categorias"][key][side] = round(self.caixa["categorias"][key][side] + value, 2)
+
+    def _remove_import(self, section: str, status_var: tk.StringVar) -> None:
+        if self.readonly:
+            messagebox.showinfo("Somente leitura", "Reabra o caixa para edicao antes de remover arquivos.")
+            return
+        self.imported_paths.pop(section, None)
+        if section == "caixa":
+            for key in CATEGORIES:
+                self.caixa["categorias"][key]["sistema"] = 0.0
+            self.caixa["sangria"] = 0.0
+            self.caixa["notas_a_prazo"] = 0.0
+            self.caixa["despesas"] = 0.0
+            self.result_btn.configure(state="disabled")
+        elif section == "pagbank":
+            for key in ["PAG_PIX", "ELO_CREDITO", "ELO_DEBITO", "MASTERCARD_CREDITO", "MASTERCARD_DEBITO", "VISA_CREDITO", "VISA_DEBITO"]:
+                self.caixa["categorias"][key]["site"] = 0.0
+        elif section == "premmia":
+            for key in ["PREMMIA_CARTAO", "PREMMIA_PIX", "PREMMIA_CUPOM"]:
+                self.caixa["categorias"][key]["site"] = 0.0
+        self._apply_fitcard()
+        self._set_status(status_var, "Nenhum arquivo importado.")
+
+    def _apply_fitcard(self) -> None:
+        text = self.fitcard_var.get().strip()
+        if not text:
+            self.fitcard_ok.set("")
+            self.caixa["fitcard_total"] = 0.0
+            self.caixa["categorias"]["CARTAO_FITCARD"]["site"] = 0.0
+            return
+        try:
+            value = parse_money(text)
+        except ValueError:
+            self.fitcard_ok.set("valor invalido")
+            return
+        self.fitcard_ok.set("✓ valor valido")
+        self.caixa["fitcard_total"] = value
+        self.caixa["categorias"]["CARTAO_FITCARD"]["site"] = value
+        if not self.caixa["categorias"]["FITCARD"]["sistema"]:
+            self.caixa["categorias"]["FITCARD"]["sistema"] = value
+
+    def _collect_common(self, status: str) -> bool:
+        try:
+            parsed = parse_date_input(self.date_var.get())
+            ensure_not_future(parsed)
+            self._apply_fitcard()
+            if not self.count_frame.validate_counts():
+                return False
+            self.caixa["data"] = date_to_iso(parsed)
+            self.caixa["status"] = status
+            self.caixa["contagens_dinheiro"] = self.count_frame.get_counts()
+            return True
+        except Exception as exc:
+            messagebox.showerror("Dados invalidos", str(exc))
+            return False
+
+    def _confirm_same_date(self) -> bool:
+        existing = self.app.repo.get_by_date(self.caixa["data"])
+        if existing and existing.get("id") != self.caixa.get("id"):
+            return messagebox.askyesno("Data ja existente", "Ja existe um caixa nesta data. Deseja sobrescrever?")
+        return True
+
+    def _reopen(self) -> None:
+        if messagebox.askyesno("Reabrir caixa", "Deseja reabrir este caixa conciliado para edicao?"):
+            self.caixa["status"] = "rascunho"
+            self.readonly = False
+            self.load_caixa(self.caixa)
+
+    def _has_system_data(self) -> bool:
+        return any(values.get("sistema") for values in self.caixa.get("categorias", {}).values())
+
+    @staticmethod
+    def _new_model() -> dict:
+        return {
+            "data": date.today().isoformat(),
+            "status": "rascunho",
+            "fitcard_total": 0.0,
+            "categorias": empty_categories(),
+            "sangria": 0.0,
+            "notas_a_prazo": 0.0,
+            "despesas": 0.0,
+            "contagens_dinheiro": [],
+            "observacoes": "",
+        }
+
+    @staticmethod
+    def _set_status(var: tk.StringVar, message: str) -> None:
+        var.set(message)
