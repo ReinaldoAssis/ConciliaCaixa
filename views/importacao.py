@@ -33,6 +33,18 @@ class ImportFrame(ttk.Frame):
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        def _bind_scroll(_event):
+            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        def _unbind_scroll(_event):
+            canvas.unbind_all("<MouseWheel>")
+
+        self.bind("<Enter>", _bind_scroll, add="+")
+        self.bind("<Leave>", _unbind_scroll, add="+")
+
         header = ttk.Frame(self.body)
         header.pack(fill="x")
         ttk.Button(header, text="Voltar ao Historico", command=self.app.show_history).pack(side="left")
@@ -97,11 +109,15 @@ class ImportFrame(ttk.Frame):
         self.avulso_cat_combo = ttk.Combobox(form, textvariable=self.avulso_cat_var, values=cat_options, width=20, state="readonly")
         self.avulso_cat_combo.pack(side="left", padx=3)
         self.avulso_nova_var = tk.StringVar()
-        self.avulso_nova_entry = ttk.Entry(form, textvariable=self.avulso_nova_var, width=16)
-        self._toggle_nova_categoria_visibility()
-        self.avulso_cat_var.trace_add("write", lambda *_args: self._on_avulso_cat_change())
         self.avulso_add_btn = ttk.Button(form, text="Adicionar", command=self._add_avulso)
         self.avulso_add_btn.pack(side="left", padx=(8, 0))
+        self.nova_cat_row = ttk.Frame(avulso_box)
+        self.nova_cat_label = ttk.Label(self.nova_cat_row, text="Nome da nova categoria:")
+        self.nova_cat_label.pack(side="left")
+        self.avulso_nova_entry = ttk.Entry(self.nova_cat_row, textvariable=self.avulso_nova_var, width=16)
+        self.avulso_nova_entry.pack(side="left", padx=(6, 0))
+        self._toggle_nova_categoria_visibility()
+        self.avulso_cat_var.trace_add("write", lambda *_args: self._on_avulso_cat_change())
         self.avulsos_tree = ttk.Treeview(avulso_box, columns=("tipo", "desc", "valor", "cat"), show="headings", height=4)
         self.avulsos_tree.heading("tipo", text="Tipo")
         self.avulsos_tree.heading("desc", text="Descricao")
@@ -111,6 +127,7 @@ class ImportFrame(ttk.Frame):
         self.avulsos_tree.column("desc", width=160, anchor="w")
         self.avulsos_tree.column("valor", width=100, anchor="center")
         self.avulsos_tree.column("cat", width=180, anchor="w")
+        self.avulsos_tree.pack(fill="x", pady=(6, 0))
         self.avulso_remove_btn = ttk.Button(avulso_box, text="Remover selecionado", command=self._remove_avulso)
         self.avulso_remove_btn.pack(anchor="w", pady=(4, 0))
 
@@ -145,7 +162,7 @@ class ImportFrame(ttk.Frame):
         self.avulso_desc_entry.configure(state=avulso_entry_state)
         self.avulso_valor_entry.configure(state=avulso_entry_state)
         self.avulso_cat_combo.configure(state=avulso_state)
-        self.avulso_nova_entry.pack_forget()
+        self.nova_cat_row.pack_forget()
         self.avulso_add_btn.configure(state=avulso_entry_state)
         self.avulso_remove_btn.configure(state=avulso_entry_state)
         self.avulso_desc_var.set("")
@@ -325,16 +342,16 @@ class ImportFrame(ttk.Frame):
         if self.readonly:
             return
         if self.avulso_cat_var.get() == "Nova categoria...":
-            self.avulso_nova_entry.pack(side="left", padx=3)
+            self.nova_cat_row.pack(fill="x", pady=(4, 0))
         else:
-            self.avulso_nova_entry.pack_forget()
+            self.nova_cat_row.pack_forget()
             self.avulso_nova_var.set("")
 
     def _toggle_nova_categoria_visibility(self) -> None:
         if self.avulso_cat_var.get() == "Nova categoria...":
-            self.avulso_nova_entry.pack(side="left", padx=3)
+            self.nova_cat_row.pack(fill="x", pady=(4, 0))
         else:
-            self.avulso_nova_entry.pack_forget()
+            self.nova_cat_row.pack_forget()
 
     def _add_avulso(self) -> None:
         if self.readonly:

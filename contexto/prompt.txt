@@ -1,0 +1,5 @@
+contexto\Manutenodeprodutos_58653_2792_1b92e0a0732911f1865ddd0bb2b4b1cf.xlsx
+
+vamos começar agora a implementação da segunda parte do sistema. A primeira parte foi para a conciliação de caixa do posto, a segunda parte do sistema será para a conciliação dos caixas do restaurante. 
+
+O sistema será bem parecido, se encontrará em uma segunda tab (não queo misturar as listas de caixa do posto com caixas do restaurante). O 
