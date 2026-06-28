@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import tkinter as tk
 from copy import deepcopy
 from tkinter import filedialog, messagebox, ttk
@@ -36,6 +37,7 @@ class ResultFrame(ttk.Frame):
         self.tree.tag_configure("ok", foreground="#198754")
         self.tree.tag_configure("bad", foreground="#dc3545")
         self.tree.pack(fill="both", expand=True, pady=12)
+        self._bind_mousewheel()
 
         self.info_var = tk.StringVar()
         ttk.Label(self, textvariable=self.info_var, justify="left").pack(anchor="w")
@@ -49,7 +51,8 @@ class ResultFrame(ttk.Frame):
         self.title_var.set(f"Resultado - {date_to_br(self.caixa['data'])}")
         for item in self.tree.get_children():
             self.tree.delete(item)
-        for index, row in enumerate(build_conciliation_rows(self.caixa.get("categorias", {}))):
+        avulsos = self.caixa.get("lancamentos_avulsos") or []
+        for index, row in enumerate(build_conciliation_rows(self.caixa.get("categorias", {}), avulsos)):
             tag = "ok" if row["status"] == "OK" else "bad"
             self.tree.insert(
                 "",
@@ -96,6 +99,17 @@ class ResultFrame(ttk.Frame):
             messagebox.showinfo("PDF exportado", f"Arquivo salvo em:\n{path}")
         except Exception as exc:
             messagebox.showerror("Erro ao exportar PDF", str(exc))
+
+    def _bind_mousewheel(self) -> None:
+        def _on_mousewheel(event):
+            if event.delta > 0:
+                self.tree.yview_scroll(-3, "units")
+            elif event.delta < 0:
+                self.tree.yview_scroll(3, "units")
+
+        self.tree.bind("<MouseWheel>", _on_mousewheel)
+        self.tree.bind("<Button-4>", lambda e: self.tree.yview_scroll(-3, "units"))
+        self.tree.bind("<Button-5>", lambda e: self.tree.yview_scroll(3, "units"))
 
     def _back(self) -> None:
         if self.caixa:

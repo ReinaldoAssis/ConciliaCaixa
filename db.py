@@ -74,7 +74,9 @@ class CaixaRepository:
         normalized.setdefault("despesas", 0.0)
         normalized.setdefault("contagens_dinheiro", [])
         normalized.setdefault("observacoes", "")
-        total_sistema, total_site, diferenca = totals(normalized["categorias"])
+        normalized.setdefault("lancamentos_avulsos", [])
+        avulsos = normalized.get("lancamentos_avulsos") or []
+        total_sistema, total_site, diferenca = totals(normalized["categorias"], avulsos)
         normalized["total_sistema"] = total_sistema
         normalized["total_site"] = total_site
         normalized["diferenca_total"] = diferenca

@@ -13,6 +13,7 @@ class MoneyCountFrame(ttk.LabelFrame):
     def __init__(self, master, readonly: bool = False):
         super().__init__(master, text="Contagem de Dinheiro", padding=10)
         self.readonly = readonly
+        self.caixa_data: str = ""
         self.counts: list[dict] = []
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True)
@@ -196,7 +197,7 @@ class MoneyCountFrame(ttk.LabelFrame):
         pad = 16
         header_h = 48
         width = 340
-        height = header_h + len(DENOMINATIONS) * row_h + 3 * row_h + pad * 2
+        height = header_h + row_h + len(DENOMINATIONS) * row_h + 3 * row_h + pad * 2
 
         img = Image.new("RGB", (width, height), "#ffffff")
         draw = ImageDraw.Draw(img)
@@ -211,9 +212,12 @@ class MoneyCountFrame(ttk.LabelFrame):
 
         y = pad
         draw.text((pad, y), "Contagem de Dinheiro", fill="#212529", font=font_title)
+        if self.caixa_data:
+            y += row_h
+            draw.text((pad, y), f"Data do caixa: {self.caixa_data}", fill="#6c757d", font=font_body)
         draw.line([(pad, y + 26), (width - pad, y + 26)], fill="#dee2e6", width=1)
 
-        y = header_h
+        y = header_h + row_h
         col_w = (width - pad * 2) // 3
         for col, text in enumerate(["Cedula", "Qtde.", "Subtotal"]):
             x = pad + col * col_w

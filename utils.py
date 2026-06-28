@@ -127,25 +127,26 @@ def copy_image_to_clipboard(image) -> bool:
             subprocess.run(["osascript", "-e", applescript], check=True, capture_output=True)
             return True
         elif os.name == "nt":
-            try:
-                import win32clipboard
-                from PIL import Image
+            from PIL import Image
 
-                img = Image.open(tmp_path)
-                output = tempfile.NamedTemporaryFile(suffix=".bmp", delete=False)
-                img.convert("RGB").save(output.name, "BMP")
-                output.close()
-                win32clipboard.OpenClipboard()
-                win32clipboard.EmptyClipboard()
-                win32clipboard.SetClipboardData(win32clipboard.CF_DIB, open(output.name, "rb").read()[14:])
-                win32clipboard.CloseClipboard()
-                try:
-                    os.unlink(output.name)
-                except OSError:
-                    pass
-                return True
-            except ImportError:
-                return False
+            img = Image.open(tmp_path)
+            bmp_path = tmp_path + ".bmp"
+            img.convert("RGB").save(bmp_path, "BMP")
+            ps_script = (
+                f'Add-Type -AssemblyName System.Windows.Forms;'
+                f'$img = [System.Drawing.Image]::FromFile("{bmp_path}");'
+                f'[System.Windows.Forms.Clipboard]::SetImage($img);'
+                f'$img.Dispose()'
+            )
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", ps_script],
+                check=False, capture_output=True, text=True,
+            )
+            try:
+                os.unlink(bmp_path)
+            except OSError:
+                pass
+            return result.returncode == 0
         else:
             return False
     except Exception:

@@ -5,8 +5,9 @@ import tkinter as tk
 from copy import deepcopy
 from datetime import date
 from tkinter import filedialog, messagebox, ttk
+from uuid import uuid4
 
-from constants import CATEGORIES, empty_categories
+from constants import CATEGORIES, CATEGORY_LABELS, empty_categories
 from parsers import parse_caixa_csv, parse_pagbank_csv, parse_premmia_file
 from utils import date_to_br, date_to_iso, ensure_not_future, format_money, parse_date_input, parse_money
 from views.contagem import MoneyCountFrame
@@ -19,6 +20,7 @@ class ImportFrame(ttk.Frame):
         self.caixa = self._new_model()
         self.imported_paths: dict[str, str] = {}
         self.readonly = False
+        self._avulsos_data: list[dict] = []
         self._build()
 
     def _build(self) -> None:
@@ -73,6 +75,45 @@ class ImportFrame(ttk.Frame):
             lambda: self._choose_file("premmia", parse_premmia_file, [("Premmia", "*.xls *.XLS *.csv *.CSV"), ("Todos", "*.*")]),
         )
 
+        avulso_box = ttk.LabelFrame(self.body, text="F - Lancamentos Avulsos", padding=10)
+        avulso_box.pack(fill="x", pady=6)
+        form = ttk.Frame(avulso_box)
+        form.pack(fill="x", pady=(0, 6))
+        ttk.Label(form, text="Tipo").pack(side="left")
+        self.avulso_tipo_var = tk.StringVar(value="RECEITA")
+        self.avulso_tipo_combo = ttk.Combobox(form, textvariable=self.avulso_tipo_var, values=["RECEITA", "DESPESA"], width=9, state="readonly")
+        self.avulso_tipo_combo.pack(side="left", padx=3)
+        ttk.Label(form, text="Descricao").pack(side="left", padx=(8, 0))
+        self.avulso_desc_var = tk.StringVar()
+        self.avulso_desc_entry = ttk.Entry(form, textvariable=self.avulso_desc_var, width=16)
+        self.avulso_desc_entry.pack(side="left", padx=3)
+        ttk.Label(form, text="Valor").pack(side="left", padx=(8, 0))
+        self.avulso_valor_var = tk.StringVar()
+        self.avulso_valor_entry = ttk.Entry(form, textvariable=self.avulso_valor_var, width=10)
+        self.avulso_valor_entry.pack(side="left", padx=3)
+        ttk.Label(form, text="Vincular a").pack(side="left", padx=(8, 0))
+        cat_options = [CATEGORY_LABELS[k] for k in CATEGORIES] + ["Nova categoria..."]
+        self.avulso_cat_var = tk.StringVar(value=cat_options[0])
+        self.avulso_cat_combo = ttk.Combobox(form, textvariable=self.avulso_cat_var, values=cat_options, width=20, state="readonly")
+        self.avulso_cat_combo.pack(side="left", padx=3)
+        self.avulso_nova_var = tk.StringVar()
+        self.avulso_nova_entry = ttk.Entry(form, textvariable=self.avulso_nova_var, width=16)
+        self._toggle_nova_categoria_visibility()
+        self.avulso_cat_var.trace_add("write", lambda *_args: self._on_avulso_cat_change())
+        self.avulso_add_btn = ttk.Button(form, text="Adicionar", command=self._add_avulso)
+        self.avulso_add_btn.pack(side="left", padx=(8, 0))
+        self.avulsos_tree = ttk.Treeview(avulso_box, columns=("tipo", "desc", "valor", "cat"), show="headings", height=4)
+        self.avulsos_tree.heading("tipo", text="Tipo")
+        self.avulsos_tree.heading("desc", text="Descricao")
+        self.avulsos_tree.heading("valor", text="Valor")
+        self.avulsos_tree.heading("cat", text="Categoria")
+        self.avulsos_tree.column("tipo", width=70, anchor="center")
+        self.avulsos_tree.column("desc", width=160, anchor="w")
+        self.avulsos_tree.column("valor", width=100, anchor="center")
+        self.avulsos_tree.column("cat", width=180, anchor="w")
+        self.avulso_remove_btn = ttk.Button(avulso_box, text="Remover selecionado", command=self._remove_avulso)
+        self.avulso_remove_btn.pack(anchor="w", pady=(4, 0))
+
         self.count_frame = MoneyCountFrame(self.body)
         self.count_frame.pack(fill="both", expand=True, pady=10)
 
@@ -90,11 +131,26 @@ class ImportFrame(ttk.Frame):
         self.caixa = deepcopy(caixa) if caixa else self._new_model()
         self.imported_paths = {}
         self.readonly = self.caixa.get("status") == "conciliado"
+        self._avulsos_data = list(self.caixa.get("lancamentos_avulsos") or [])
         self.date_var.set(date_to_br(self.caixa["data"]))
         self.fitcard_var.set(str(self.caixa.get("fitcard_total", 0)).replace(".", ",") if self.caixa.get("fitcard_total") else "")
         self.title_var.set("Caixa Conciliado" if self.readonly else "Caixa em Edicao")
         self.count_frame.readonly = self.readonly
+        self.count_frame.caixa_data = date_to_br(self.caixa["data"])
         self.count_frame.set_counts(self.caixa.get("contagens_dinheiro", []))
+        self._refresh_avulsos_tree()
+        avulso_state = "disabled" if self.readonly else "readonly"
+        avulso_entry_state = "disabled" if self.readonly else "normal"
+        self.avulso_tipo_combo.configure(state=avulso_state)
+        self.avulso_desc_entry.configure(state=avulso_entry_state)
+        self.avulso_valor_entry.configure(state=avulso_entry_state)
+        self.avulso_cat_combo.configure(state=avulso_state)
+        self.avulso_nova_entry.pack_forget()
+        self.avulso_add_btn.configure(state=avulso_entry_state)
+        self.avulso_remove_btn.configure(state=avulso_entry_state)
+        self.avulso_desc_var.set("")
+        self.avulso_valor_var.set("")
+        self.avulso_nova_var.set("")
         self._set_status(self.caixa_status, "Importe o arquivo CAIXA CSV." if not caixa else "Dados do CAIXA carregados do registro.")
         self._set_status(self.pagbank_status, "Importe o arquivo PagBank CSV." if not caixa else "Dados PagBank carregados do registro.")
         self._set_status(self.premmia_status, "Importe o arquivo Premmia XLS." if not caixa else "Dados Premmia carregados do registro.")
@@ -229,6 +285,7 @@ class ImportFrame(ttk.Frame):
             self.caixa["data"] = date_to_iso(parsed)
             self.caixa["status"] = status
             self.caixa["contagens_dinheiro"] = self.count_frame.get_counts()
+            self.caixa["lancamentos_avulsos"] = self._collect_avulsos()
             return True
         except Exception as exc:
             messagebox.showerror("Dados invalidos", str(exc))
@@ -260,8 +317,104 @@ class ImportFrame(ttk.Frame):
             "notas_a_prazo": 0.0,
             "despesas": 0.0,
             "contagens_dinheiro": [],
+            "lancamentos_avulsos": [],
             "observacoes": "",
         }
+
+    def _on_avulso_cat_change(self) -> None:
+        if self.readonly:
+            return
+        if self.avulso_cat_var.get() == "Nova categoria...":
+            self.avulso_nova_entry.pack(side="left", padx=3)
+        else:
+            self.avulso_nova_entry.pack_forget()
+            self.avulso_nova_var.set("")
+
+    def _toggle_nova_categoria_visibility(self) -> None:
+        if self.avulso_cat_var.get() == "Nova categoria...":
+            self.avulso_nova_entry.pack(side="left", padx=3)
+        else:
+            self.avulso_nova_entry.pack_forget()
+
+    def _add_avulso(self) -> None:
+        if self.readonly:
+            return
+        desc = self.avulso_desc_var.get().strip()
+        if not desc:
+            messagebox.showwarning("Descricao obrigatoria", "Informe uma descricao para o lancamento avulso.")
+            return
+        try:
+            valor = parse_money(self.avulso_valor_var.get())
+        except ValueError:
+            messagebox.showwarning("Valor invalido", "Informe um valor monetario valido.")
+            return
+        if valor <= 0:
+            messagebox.showwarning("Valor invalido", "O valor deve ser maior que zero.")
+            return
+        tipo = self.avulso_tipo_var.get()
+        cat_label = self.avulso_cat_var.get()
+        if cat_label == "Nova categoria...":
+            nova = self.avulso_nova_var.get().strip().upper()
+            if not nova:
+                messagebox.showwarning("Nome obrigatorio", "Informe o nome da nova categoria.")
+                return
+            entry = {
+                "id": str(uuid4()),
+                "descricao": desc,
+                "valor": round(valor, 2),
+                "tipo": tipo,
+                "categoria_vinculada": None,
+                "categoria_nova": nova,
+            }
+        else:
+            key = [k for k, v in CATEGORY_LABELS.items() if v == cat_label][0]
+            entry = {
+                "id": str(uuid4()),
+                "descricao": desc,
+                "valor": round(valor, 2),
+                "tipo": tipo,
+                "categoria_vinculada": key,
+                "categoria_nova": None,
+            }
+        self._avulsos_data.append(entry)
+        self._refresh_avulsos_tree()
+        self.avulso_desc_var.set("")
+        self.avulso_valor_var.set("")
+        self.avulso_nova_var.set("")
+
+    def _remove_avulso(self) -> None:
+        if self.readonly:
+            return
+        selected = self.avulsos_tree.selection()
+        if not selected:
+            return
+        item_id = selected[0]
+        idx = int(item_id)
+        self._avulsos_data.pop(idx)
+        self._refresh_avulsos_tree()
+
+    def _refresh_avulsos_tree(self) -> None:
+        for row in self.avulsos_tree.get_children():
+            self.avulsos_tree.delete(row)
+        for idx, entry in enumerate(self._avulsos_data):
+            if entry.get("categoria_vinculada"):
+                cat_display = CATEGORY_LABELS.get(entry["categoria_vinculada"], entry["categoria_vinculada"])
+            else:
+                cat_display = entry.get("categoria_nova", "(nova)")
+            self.avulsos_tree.insert(
+                "",
+                "end",
+                iid=str(idx),
+                values=(
+                    entry["tipo"],
+                    entry["descricao"],
+                    format_money(entry["valor"]),
+                    cat_display,
+                ),
+            )
+
+    def _collect_avulsos(self) -> list[dict]:
+        return list(self._avulsos_data)
 
     @staticmethod
     def _set_status(var: tk.StringVar, message: str) -> None:

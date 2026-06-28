@@ -29,7 +29,8 @@ def export_caixa_pdf(caixa: dict, output_path: str | Path) -> Path:
     ]
 
     table_data = [["Categoria", "Sistema", "Site", "Diferenca", "Status"]]
-    for row in build_conciliation_rows(caixa.get("categorias", {})):
+    avulsos = caixa.get("lancamentos_avulsos") or []
+    for row in build_conciliation_rows(caixa.get("categorias", {}), avulsos):
         table_data.append(
             [
                 row["label"],
@@ -62,6 +63,31 @@ def export_caixa_pdf(caixa: dict, output_path: str | Path) -> Path:
             hAlign="LEFT",
         )
     )
+
+    lancamentos = caixa.get("lancamentos_avulsos") or []
+    if lancamentos:
+        story.extend([Spacer(1, 0.4 * cm), Paragraph("Lancamentos Avulsos", styles["Heading2"])])
+        avulso_data = [["Tipo", "Descricao", "Valor", "Categoria"]]
+        for item in lancamentos:
+            if item.get("categoria_vinculada"):
+                from constants import CATEGORY_LABELS
+                cat_label = CATEGORY_LABELS.get(item["categoria_vinculada"], item["categoria_vinculada"])
+            else:
+                cat_label = item.get("categoria_nova", "")
+            avulso_data.append([
+                item.get("tipo", ""),
+                item.get("descricao", ""),
+                format_money(item.get("valor", 0)),
+                cat_label,
+            ])
+        avulso_table = Table(avulso_data, hAlign="LEFT")
+        avulso_table.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#adb5bd")),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e9ecef")),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("ALIGN", (2, 1), (2, -1), "RIGHT"),
+        ]))
+        story.append(avulso_table)
 
     story.extend([Spacer(1, 0.4 * cm), Paragraph("Contagem de Dinheiro", styles["Heading2"])])
     contagens = caixa.get("contagens_dinheiro") or []
