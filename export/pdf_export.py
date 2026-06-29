@@ -153,3 +153,116 @@ def export_caixa_pdf(caixa: dict, output_path: str | Path) -> Path:
 
     doc.build(story, onFirstPage=footer, onLaterPages=footer)
     return path
+
+
+def export_caixa_restaurante_pdf(caixa: dict, output_path: str | Path) -> Path:
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.units import cm
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    except ImportError as exc:
+        raise RuntimeError("Instale reportlab para exportar PDF.") from exc
+
+    from constants_restaurante import CATEGORIAS_RESTAURANTE_LABELS, build_conciliation_rows_restaurante
+
+    path = Path(output_path)
+    doc = SimpleDocTemplate(str(path), pagesize=A4, rightMargin=1.5 * cm, leftMargin=1.5 * cm)
+    styles = getSampleStyleSheet()
+    story = [
+        Paragraph("CaixaPos - Restaurante - Auto Posto Lagoa Cafe", styles["Title"]),
+        Paragraph(f"Data do caixa: {date_to_br(caixa['data'])}", styles["Normal"]),
+        Paragraph(f"Exportado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}", styles["Normal"]),
+        Spacer(1, 0.4 * cm),
+        Paragraph("Resultado da Conciliacao", styles["Heading2"]),
+    ]
+
+    avulsos = caixa.get("lancamentos_avulsos") or []
+    dinheiro_real = sum(
+        (c.get("total", 0) or 0) for c in (caixa.get("contagens_dinheiro") or [])
+    )
+    table_data = [["Categoria", "Classif.", "Sistema", "Real", "Diferenca", "Status"]]
+    for row in build_conciliation_rows_restaurante(
+        caixa.get("categorias", {}), avulsos, round(dinheiro_real, 2)
+    ):
+        table_data.append([
+            row["label"],
+            row["classificacao"],
+            format_money(row["sistema"]),
+            format_money(row["real"]),
+            format_money(row["diferenca"]),
+            row["status"],
+        ])
+    table = Table(table_data, repeatRows=1, hAlign="LEFT")
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e9ecef")),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#adb5bd")),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("ALIGN", (2, 1), (-1, -1), "RIGHT"),
+        ("ALIGN", (-1, 1), (-1, -1), "CENTER"),
+    ]))
+    story.append(table)
+
+    lancamentos = caixa.get("lancamentos_avulsos") or []
+    if lancamentos:
+        story.extend([Spacer(1, 0.4 * cm), Paragraph("Lancamentos Avulsos", styles["Heading2"])])
+        avulso_data = [["Tipo", "Descricao", "Valor", "Categoria"]]
+        for item in lancamentos:
+            if item.get("categoria_vinculada"):
+                cat_label = CATEGORIAS_RESTAURANTE_LABELS.get(
+                    item["categoria_vinculada"], item["categoria_vinculada"]
+                )
+            else:
+                cat_label = item.get("categoria_nova", "")
+            avulso_data.append([
+                item.get("tipo", ""),
+                item.get("descricao", ""),
+                format_money(item.get("valor", 0)),
+                cat_label,
+            ])
+        avulso_table = Table(avulso_data, hAlign="LEFT")
+        avulso_table.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#adb5bd")),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e9ecef")),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("ALIGN", (2, 1), (2, -1), "RIGHT"),
+        ]))
+        story.append(avulso_table)
+
+    story.extend([Spacer(1, 0.4 * cm), Paragraph("Contagem de Dinheiro", styles["Heading2"])])
+    contagens = caixa.get("contagens_dinheiro") or []
+    if not contagens:
+        story.append(Paragraph("Nenhuma contagem registrada.", styles["Normal"]))
+    else:
+        for contagem in contagens:
+            story.append(Paragraph(contagem.get("label", "Contagem"), styles["Heading3"]))
+            rows = [["Cedula", "Quantidade", "Subtotal"]]
+            notas = contagem.get("notas", {})
+            for denom in DENOMINATIONS:
+                qty = int(notas.get(str(denom), 0) or 0)
+                rows.append([f"R$ {denom}", str(qty), format_money(qty * denom)])
+            rows.append(["Moedas", "", format_money(contagem.get("moedas", 0))])
+            rows.append(["Total", "", format_money(contagem.get("total", 0))])
+            tbl = Table(rows, hAlign="LEFT")
+            tbl.setStyle(TableStyle([
+                ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#adb5bd")),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e9ecef")),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
+            ]))
+            story.append(tbl)
+            serials = contagem.get("seriais_200") or []
+            if serials:
+                story.append(Paragraph("Seriais R$ 200: " + ", ".join(serials), styles["Normal"]))
+            story.append(Spacer(1, 0.2 * cm))
+
+    def footer(canvas, document):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 8)
+        canvas.drawString(1.5 * cm, 1 * cm, "CaixaPos - Restaurante")
+        canvas.drawRightString(19.5 * cm, 1 * cm, f"Pagina {document.page}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=footer, onLaterPages=footer)
+    return path
