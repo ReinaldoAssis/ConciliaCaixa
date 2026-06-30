@@ -4,6 +4,7 @@ CATEGORIES = [
     "PREMMIA_CARTAO",
     "PREMMIA_PIX",
     "PREMMIA_CUPOM",
+    "PREMMIA_VALE",
     "FITCARD",
     "PAG_PIX",
     "ELO_CREDITO",
@@ -18,6 +19,7 @@ CATEGORY_LABELS = {
     "PREMMIA_CARTAO": "PREMMIA CARTAO",
     "PREMMIA_PIX": "PREMMIA PIX",
     "PREMMIA_CUPOM": "PREMMIA CUPOM",
+    "PREMMIA_VALE": "PREMMIA VALE",
     "FITCARD": "FITCARD",
     "PAG_PIX": "PAG PIX",
     "ELO_CREDITO": "ELO CREDITO",
@@ -53,13 +55,21 @@ def normalize_categories(categorias: dict[str, dict[str, float]] | None) -> dict
     return normalized
 
 
-def _apply_avulsos(base_sistema: float, avulsos: list[dict], key: str) -> float:
-    result = base_sistema
+def _apply_avulsos(
+    base_sistema: float, base_site: float, avulsos: list[dict], key: str
+) -> tuple[float, float]:
+    sistema = base_sistema
+    site = base_site
     for avulso in (avulsos or []):
         if avulso.get("categoria_vinculada") == key:
             valor = float(avulso.get("valor", 0) or 0)
-            result = round(result + valor if avulso.get("tipo") == "RECEITA" else result - valor, 2)
-    return result
+            delta = round(valor if avulso.get("tipo") == "RECEITA" else -valor, 2)
+            coluna = avulso.get("coluna", "sistema")
+            if coluna == "site":
+                site = round(site + delta, 2)
+            else:
+                sistema = round(sistema + delta, 2)
+    return sistema, site
 
 
 def build_conciliation_rows(
@@ -72,7 +82,7 @@ def build_conciliation_rows(
         values = categorias.get(key, {})
         sistema = round(float(values.get("sistema", 0) or 0), 2)
         site = round(float(values.get("site", 0) or 0), 2)
-        sistema = _apply_avulsos(sistema, avulsos or [], key)
+        sistema, site = _apply_avulsos(sistema, site, avulsos or [], key)
         diff = round(sistema - site, 2)
         rows.append(
             {
@@ -88,15 +98,18 @@ def build_conciliation_rows(
         if avulso.get("categoria_nova"):
             valor = float(avulso.get("valor", 0) or 0)
             label = avulso["categoria_nova"]
-            sistema_new = round(valor if avulso.get("tipo") == "RECEITA" else -valor, 2)
+            delta = round(valor if avulso.get("tipo") == "RECEITA" else -valor, 2)
+            coluna = avulso.get("coluna", "sistema")
+            sistema_new = delta if coluna != "site" else 0.0
+            site_new = delta if coluna == "site" else 0.0
             rows.append(
                 {
                     "key": label,
                     "label": label,
                     "sistema": sistema_new,
-                    "site": 0.0,
-                    "diferenca": sistema_new,
-                    "status": "OK" if abs(sistema_new) < 0.005 else "DIVERGENTE",
+                    "site": site_new,
+                    "diferenca": round(sistema_new - site_new, 2),
+                    "status": "OK" if abs(sistema_new - site_new) < 0.005 else "DIVERGENTE",
                 }
             )
     return rows

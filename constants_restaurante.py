@@ -57,15 +57,21 @@ def normalize_categories_restaurante(
     return normalized
 
 
-def _apply_avulsos_restaurante(base_sistema: float, avulsos: list[dict], key: str) -> float:
-    result = base_sistema
+def _apply_avulsos_restaurante(
+    base_sistema: float, base_real: float, avulsos: list[dict], key: str
+) -> tuple[float, float]:
+    sistema = base_sistema
+    real = base_real
     for avulso in (avulsos or []):
         if avulso.get("categoria_vinculada") == key:
             valor = float(avulso.get("valor", 0) or 0)
-            result = round(
-                result + valor if avulso.get("tipo") == "RECEITA" else result - valor, 2
-            )
-    return result
+            delta = round(valor if avulso.get("tipo") == "RECEITA" else -valor, 2)
+            coluna = avulso.get("coluna", "sistema")
+            if coluna == "real":
+                real = round(real + delta, 2)
+            else:
+                sistema = round(sistema + delta, 2)
+    return sistema, real
 
 
 def build_conciliation_rows_restaurante(
@@ -81,7 +87,7 @@ def build_conciliation_rows_restaurante(
         real = round(float(values.get("real", 0) or 0), 2)
         if key == "DINHEIRO":
             real = round(dinheiro_real, 2)
-        sistema = _apply_avulsos_restaurante(sistema, avulsos or [], key)
+        sistema, real = _apply_avulsos_restaurante(sistema, real, avulsos or [], key)
         diff = round(sistema - real, 2)
         rows.append({
             "key": key,
@@ -96,15 +102,18 @@ def build_conciliation_rows_restaurante(
         if avulso.get("categoria_nova"):
             valor = float(avulso.get("valor", 0) or 0)
             label = avulso["categoria_nova"]
-            sistema_new = round(valor if avulso.get("tipo") == "RECEITA" else -valor, 2)
+            delta = round(valor if avulso.get("tipo") == "RECEITA" else -valor, 2)
+            coluna = avulso.get("coluna", "sistema")
+            sistema_new = delta if coluna != "real" else 0.0
+            real_new = delta if coluna == "real" else 0.0
             rows.append({
                 "key": label,
                 "label": label,
                 "classificacao": "",
                 "sistema": sistema_new,
-                "real": 0.0,
-                "diferenca": sistema_new,
-                "status": "OK" if abs(sistema_new) < 0.005 else "DIVERGENTE",
+                "real": real_new,
+                "diferenca": round(sistema_new - real_new, 2),
+                "status": "OK" if abs(sistema_new - real_new) < 0.005 else "DIVERGENTE",
             })
     return rows
 

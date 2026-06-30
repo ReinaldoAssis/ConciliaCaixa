@@ -50,16 +50,17 @@ class ImportRestauranteFrame(ttk.Frame):
         scrollbar.pack(side="right", fill="y")
 
         def _on_mousewheel(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            if event.delta:
+                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            else:
+                canvas.yview_scroll(-3 if event.num == 4 else 3, "units")
 
-        def _bind_scroll(_event):
-            canvas.bind_all("<MouseWheel>", _on_mousewheel)
-
-        def _unbind_scroll(_event):
-            canvas.unbind_all("<MouseWheel>")
-
-        self.bind("<Enter>", _bind_scroll, add="+")
-        self.bind("<Leave>", _unbind_scroll, add="+")
+        canvas.bind("<MouseWheel>", _on_mousewheel)
+        canvas.bind("<Button-4>", lambda e: canvas.yview_scroll(-3, "units"))
+        canvas.bind("<Button-5>", lambda e: canvas.yview_scroll(3, "units"))
+        self.body.bind("<MouseWheel>", _on_mousewheel)
+        self.body.bind("<Button-4>", lambda e: canvas.yview_scroll(-3, "units"))
+        self.body.bind("<Button-5>", lambda e: canvas.yview_scroll(3, "units"))
 
         header = ttk.Frame(self.body)
         header.pack(fill="x")
@@ -135,6 +136,10 @@ class ImportRestauranteFrame(ttk.Frame):
         self.avulso_tipo_var = tk.StringVar(value="RECEITA")
         self.avulso_tipo_combo = ttk.Combobox(form, textvariable=self.avulso_tipo_var, values=["RECEITA", "DESPESA"], width=9, state="readonly")
         self.avulso_tipo_combo.pack(side="left", padx=3)
+        ttk.Label(form, text="Coluna").pack(side="left", padx=(8, 0))
+        self.avulso_coluna_var = tk.StringVar(value="sistema")
+        self.avulso_coluna_combo = ttk.Combobox(form, textvariable=self.avulso_coluna_var, values=["sistema", "real"], width=9, state="readonly")
+        self.avulso_coluna_combo.pack(side="left", padx=3)
         ttk.Label(form, text="Descricao").pack(side="left", padx=(8, 0))
         self.avulso_desc_var = tk.StringVar()
         self.avulso_desc_entry = ttk.Entry(form, textvariable=self.avulso_desc_var, width=16)
@@ -158,15 +163,17 @@ class ImportRestauranteFrame(ttk.Frame):
         self.avulso_nova_entry.pack(side="left", padx=(6, 0))
         self.avulso_cat_var.trace_add("write", lambda *_args: self._on_avulso_cat_change())
 
-        self.avulsos_tree = ttk.Treeview(avulso_box, columns=("tipo", "desc", "valor", "cat"), show="headings", height=4)
+        self.avulsos_tree = ttk.Treeview(avulso_box, columns=("tipo", "coluna", "desc", "valor", "cat"), show="headings", height=4)
         self.avulsos_tree.heading("tipo", text="Tipo")
+        self.avulsos_tree.heading("coluna", text="Coluna")
         self.avulsos_tree.heading("desc", text="Descricao")
         self.avulsos_tree.heading("valor", text="Valor")
         self.avulsos_tree.heading("cat", text="Categoria")
-        self.avulsos_tree.column("tipo", width=70, anchor="center")
-        self.avulsos_tree.column("desc", width=160, anchor="w")
-        self.avulsos_tree.column("valor", width=100, anchor="center")
-        self.avulsos_tree.column("cat", width=180, anchor="w")
+        self.avulsos_tree.column("tipo", width=60, anchor="center")
+        self.avulsos_tree.column("coluna", width=60, anchor="center")
+        self.avulsos_tree.column("desc", width=140, anchor="w")
+        self.avulsos_tree.column("valor", width=90, anchor="center")
+        self.avulsos_tree.column("cat", width=160, anchor="w")
         self.avulsos_tree.pack(fill="x", pady=(6, 0))
         self.avulso_remove_btn = ttk.Button(avulso_box, text="Remover selecionado", command=self._remove_avulso)
         self.avulso_remove_btn.pack(anchor="w", pady=(4, 0))
@@ -210,6 +217,7 @@ class ImportRestauranteFrame(ttk.Frame):
         avulso_state = "disabled" if self.readonly else "readonly"
         avulso_entry_state = "disabled" if self.readonly else "normal"
         self.avulso_tipo_combo.configure(state=avulso_state)
+        self.avulso_coluna_combo.configure(state=avulso_state)
         self.avulso_desc_entry.configure(state=avulso_entry_state)
         self.avulso_valor_entry.configure(state=avulso_entry_state)
         self.avulso_cat_combo.configure(state=avulso_state)
@@ -471,9 +479,6 @@ class ImportRestauranteFrame(ttk.Frame):
         if self.readonly:
             return
         desc = self.avulso_desc_var.get().strip()
-        if not desc:
-            messagebox.showwarning("Descricao obrigatoria", "Informe uma descricao para o lancamento avulso.")
-            return
         try:
             valor = parse_money(self.avulso_valor_var.get())
         except ValueError:
@@ -483,6 +488,7 @@ class ImportRestauranteFrame(ttk.Frame):
             messagebox.showwarning("Valor invalido", "O valor deve ser maior que zero.")
             return
         tipo = self.avulso_tipo_var.get()
+        coluna = self.avulso_coluna_var.get()
         cat_label = self.avulso_cat_var.get()
         if cat_label == "Nova categoria...":
             nova = self.avulso_nova_var.get().strip().upper()
@@ -494,6 +500,7 @@ class ImportRestauranteFrame(ttk.Frame):
                 "descricao": desc,
                 "valor": round(valor, 2),
                 "tipo": tipo,
+                "coluna": coluna,
                 "categoria_vinculada": None,
                 "categoria_nova": nova,
             }
@@ -504,6 +511,7 @@ class ImportRestauranteFrame(ttk.Frame):
                 "descricao": desc,
                 "valor": round(valor, 2),
                 "tipo": tipo,
+                "coluna": coluna,
                 "categoria_vinculada": key,
                 "categoria_nova": None,
             }
@@ -536,7 +544,13 @@ class ImportRestauranteFrame(ttk.Frame):
                 cat_display = entry.get("categoria_nova", "(nova)")
             self.avulsos_tree.insert(
                 "", "end", iid=str(idx),
-                values=(entry["tipo"], entry["descricao"], format_money(entry["valor"]), cat_display),
+                values=(
+                    entry["tipo"],
+                    entry.get("coluna", "sistema"),
+                    entry["descricao"],
+                    format_money(entry["valor"]),
+                    cat_display,
+                ),
             )
 
     def _collect_avulsos(self) -> list[dict]:
