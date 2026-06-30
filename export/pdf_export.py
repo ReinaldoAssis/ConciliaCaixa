@@ -179,12 +179,12 @@ def export_caixa_restaurante_pdf(caixa: dict, output_path: str | Path) -> Path:
     ]
 
     avulsos = caixa.get("lancamentos_avulsos") or []
-    dinheiro_real = sum(
-        (c.get("total", 0) or 0) for c in (caixa.get("contagens_dinheiro") or [])
-    )
+    contagens = caixa.get("contagens_dinheiro") or []
+    geral = next((c for c in contagens if c.get("label") == "Geral"), None)
+    dinheiro_real = round(geral.get("total", 0) if geral else 0, 2)
     table_data = [["Categoria", "Classif.", "Sistema", "Real", "Diferenca", "Status"]]
     for row in build_conciliation_rows_restaurante(
-        caixa.get("categorias", {}), avulsos, round(dinheiro_real, 2)
+        caixa.get("categorias", {}), avulsos, dinheiro_real
     ):
         table_data.append([
             row["label"],

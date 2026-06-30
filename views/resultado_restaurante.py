@@ -50,11 +50,12 @@ class ResultRestauranteFrame(ttk.Frame):
         for item in self.tree.get_children():
             self.tree.delete(item)
         avulsos = self.caixa.get("lancamentos_avulsos") or []
-        dinheiro_real = sum(
-            (c.get("total", 0) or 0) for c in (self.caixa.get("contagens_dinheiro") or [])
-        )
+        contagens = self.caixa.get("contagens_dinheiro") or []
+        geral = next((c for c in contagens if c.get("label") == "Geral"), None)
+        dinheiro_real = round(geral.get("total", 0) if geral else 0, 2)
+        total_diff = 0.0
         for row in build_conciliation_rows_restaurante(
-            self.caixa.get("categorias", {}), avulsos, round(dinheiro_real, 2)
+            self.caixa.get("categorias", {}), avulsos, dinheiro_real
         ):
             tag = "ok" if row["status"] == "OK" else "bad"
             self.tree.insert(
@@ -69,6 +70,12 @@ class ResultRestauranteFrame(ttk.Frame):
                 ),
                 tags=(tag,),
             )
+            total_diff += float(row["diferenca"])
+        footer_row = (
+            "", "", "Diferença Total:", format_money(round(total_diff, 2)), "",
+        )
+        tag = "ok" if abs(total_diff) < 0.005 else "bad"
+        self.tree.insert("", "end", values=footer_row, tags=(tag,))
 
     def save(self) -> None:
         if not self.caixa:

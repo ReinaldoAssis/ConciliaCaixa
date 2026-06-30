@@ -39,12 +39,16 @@ class ImportFrame(ttk.Frame):
             else:
                 canvas.yview_scroll(-3 if event.num == 4 else 3, "units")
 
-        canvas.bind("<MouseWheel>", _on_mousewheel)
-        canvas.bind("<Button-4>", lambda e: canvas.yview_scroll(-3, "units"))
-        canvas.bind("<Button-5>", lambda e: canvas.yview_scroll(3, "units"))
-        self.body.bind("<MouseWheel>", _on_mousewheel)
-        self.body.bind("<Button-4>", lambda e: canvas.yview_scroll(-3, "units"))
-        self.body.bind("<Button-5>", lambda e: canvas.yview_scroll(3, "units"))
+        def _bind_recursive(widget):
+            widget.bind("<MouseWheel>", _on_mousewheel, add="+")
+            widget.bind("<Button-4>", lambda e: canvas.yview_scroll(-3, "units"), add="+")
+            widget.bind("<Button-5>", lambda e: canvas.yview_scroll(3, "units"), add="+")
+            for child in widget.winfo_children():
+                _bind_recursive(child)
+
+        _bind_recursive(canvas)
+        _bind_recursive(self.body)
+        self._rebind_scroll = lambda: _bind_recursive(self.body)
 
         header = ttk.Frame(self.body)
         header.pack(fill="x")

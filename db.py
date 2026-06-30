@@ -150,11 +150,11 @@ class CaixaRestauranteRepository:
         normalized.setdefault("observacoes", "")
         normalized.setdefault("lancamentos_avulsos", [])
         avulsos = normalized.get("lancamentos_avulsos") or []
-        dinheiro_real = sum(
-            (c.get("total", 0) or 0) for c in (normalized.get("contagens_dinheiro") or [])
-        )
+        contagens = normalized.get("contagens_dinheiro") or []
+        geral = next((c for c in contagens if c.get("label") == "Geral"), None)
+        dinheiro_real = round(geral.get("total", 0) if geral else 0, 2)
         total_sistema, total_real, diferenca = totals_restaurante(
-            normalized["categorias"], avulsos, round(dinheiro_real, 2)
+            normalized["categorias"], avulsos, dinheiro_real
         )
         normalized["total_sistema"] = total_sistema
         normalized["total_real"] = total_real

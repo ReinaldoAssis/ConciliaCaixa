@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 import tkinter as tk
 from copy import deepcopy
-from datetime import date
+from datetime import date, datetime
 from tkinter import filedialog, messagebox, ttk
 from uuid import uuid4
 
@@ -15,8 +15,7 @@ from constants_restaurante import (
 )
 from parsers.restaurante_pagbank_csv import (
     aggregate_transactions,
-    parse_restaurante_pagbank_csv,
-    split_transactions_by_time,
+    read_restaurante_transactions,
 )
 from utils import (
     date_to_br,
@@ -55,12 +54,16 @@ class ImportRestauranteFrame(ttk.Frame):
             else:
                 canvas.yview_scroll(-3 if event.num == 4 else 3, "units")
 
-        canvas.bind("<MouseWheel>", _on_mousewheel)
-        canvas.bind("<Button-4>", lambda e: canvas.yview_scroll(-3, "units"))
-        canvas.bind("<Button-5>", lambda e: canvas.yview_scroll(3, "units"))
-        self.body.bind("<MouseWheel>", _on_mousewheel)
-        self.body.bind("<Button-4>", lambda e: canvas.yview_scroll(-3, "units"))
-        self.body.bind("<Button-5>", lambda e: canvas.yview_scroll(3, "units"))
+        def _bind_recursive(widget):
+            widget.bind("<MouseWheel>", _on_mousewheel, add="+")
+            widget.bind("<Button-4>", lambda e: canvas.yview_scroll(-3, "units"), add="+")
+            widget.bind("<Button-5>", lambda e: canvas.yview_scroll(3, "units"), add="+")
+            for child in widget.winfo_children():
+                _bind_recursive(child)
+
+        _bind_recursive(canvas)
+        _bind_recursive(self.body)
+        self._rebind_scroll = lambda: _bind_recursive(self.body)
 
         header = ttk.Frame(self.body)
         header.pack(fill="x")
@@ -72,9 +75,13 @@ class ImportRestauranteFrame(ttk.Frame):
 
         data_box = ttk.LabelFrame(self.body, text="A - Data da Conciliacao", padding=10)
         data_box.pack(fill="x", pady=10)
-        self.date_var = tk.StringVar()
         ttk.Label(data_box, text="Data").pack(side="left")
+        self.date_var = tk.StringVar()
         ttk.Entry(data_box, textvariable=self.date_var, width=14).pack(side="left", padx=8)
+        ttk.Label(data_box, text="Turno").pack(side="left", padx=(16, 0))
+        self.turno_var = tk.StringVar(value="Todos")
+        self.turno_combo = ttk.Combobox(data_box, textvariable=self.turno_var, values=["T1", "T2", "Todos"], width=6, state="readonly")
+        self.turno_combo.pack(side="left", padx=6)
 
         pagbank_box = ttk.LabelFrame(self.body, text="B - Relatorio PagBank (CSV) - Preenche coluna REAL", padding=10)
         pagbank_box.pack(fill="x", pady=6)
@@ -84,16 +91,6 @@ class ImportRestauranteFrame(ttk.Frame):
         ttk.Label(top_row, textvariable=self.pagbank_status, wraplength=600).pack(side="left", fill="x", expand=True)
         ttk.Button(top_row, text="Selecionar Arquivo", command=self._choose_pagbank).pack(side="right", padx=4)
         ttk.Button(top_row, text="Remover", command=self._remove_pagbank).pack(side="right")
-        split_row = ttk.Frame(pagbank_box)
-        split_row.pack(fill="x", pady=(6, 0))
-        self.split_var = tk.BooleanVar(value=False)
-        self.split_cb = ttk.Checkbutton(
-            split_row, text="Dividir em turnos", variable=self.split_var, command=self._on_split_toggle
-        )
-        self.split_cb.pack(side="left")
-        ttk.Label(split_row, text="Fechamento 1° turno (HH:MM)").pack(side="left", padx=(16, 0))
-        self.split_time_var = tk.StringVar(value="15:00")
-        self.split_time_entry = ttk.Entry(split_row, textvariable=self.split_time_var, width=8)
 
         sistema_box = ttk.LabelFrame(self.body, text="C - Conciliacao (Sistema = manual, Real = auto)", padding=10)
         sistema_box.pack(fill="x", pady=6)
@@ -124,8 +121,15 @@ class ImportRestauranteFrame(ttk.Frame):
             diff_color = "#198754"
             ttk.Label(grid, textvariable=diff_var, width=14, anchor="e", foreground=diff_color).grid(row=idx, column=4, sticky="w", padx=3, pady=2)
             var.trace_add("write", lambda *_a, k=key: self._apply_sistema(k))
+        self.total_diff_var = tk.StringVar(value="")
+        total_row = len(CATEGORIAS_RESTAURANTE) + 1
+        sep = ttk.Separator(grid, orient="horizontal")
+        sep.grid(row=total_row, column=0, columnspan=5, sticky="ew", pady=4)
+        self.total_diff_label = ttk.Label(grid, textvariable=self.total_diff_var, font=("", 11, "bold"), foreground="#0d6efd")
+        self.total_diff_label.grid(row=total_row + 1, column=3, columnspan=2, sticky="e", padx=3, pady=4)
+        ttk.Label(grid, text="Diferença Total:", font=("", 11, "bold")).grid(row=total_row + 1, column=2, sticky="e", padx=3, pady=4)
 
-        self.count_frame = MoneyCountFrame(self.body)
+        self.count_frame = MoneyCountFrame(self.body, on_change=self._on_contagem_change)
         self.count_frame.pack(fill="both", expand=True, pady=10)
 
         avulso_box = ttk.LabelFrame(self.body, text="D - Lancamentos Avulsos", padding=10)
@@ -188,7 +192,7 @@ class ImportRestauranteFrame(ttk.Frame):
         self.progress.pack(fill="x", pady=(0, 10))
         self.progress.pack_forget()
 
-        self.split_time_entry.pack_forget()
+        self._rebind_scroll()
 
     def load_caixa(self, caixa: dict | None = None) -> None:
         self.caixa = deepcopy(caixa) if caixa else self._new_model()
@@ -196,6 +200,14 @@ class ImportRestauranteFrame(ttk.Frame):
         self.readonly = self.caixa.get("status") == "conciliado"
         self._avulsos_data = list(self.caixa.get("lancamentos_avulsos") or [])
         self.date_var.set(date_to_br(self.caixa["data"]))
+        turno_raw = self.caixa.get("turno")
+        if turno_raw == 1:
+            self.turno_var.set("T1")
+        elif turno_raw == 2:
+            self.turno_var.set("T2")
+        else:
+            self.turno_var.set("Todos")
+        self.turno_combo.configure(state="disabled" if self.readonly else "readonly")
         title = "Caixa Conciliado"
         if not self.readonly:
             turno = self.caixa.get("turno")
@@ -204,6 +216,8 @@ class ImportRestauranteFrame(ttk.Frame):
         self.count_frame.readonly = self.readonly
         self.count_frame.caixa_data = date_to_br(self.caixa["data"])
         self.count_frame.set_counts(self.caixa.get("contagens_dinheiro", []))
+        self._sync_dinheiro_real()
+        self._refresh_total_diff()
         self._refresh_avulsos_tree()
 
         for key in CATEGORIAS_RESTAURANTE:
@@ -253,57 +267,110 @@ class ImportRestauranteFrame(ttk.Frame):
             messagebox.showinfo("Somente leitura", "Reabra o caixa para edicao antes de importar arquivos.")
             return
 
-        if self.split_var.get():
-            self._import_with_split()
-            return
-
         path = filedialog.askopenfilename(filetypes=[("CSV", "*.csv"), ("Todos", "*.*")])
         if not path:
             return
         if self.imported_paths.get("pagbank") == path:
             messagebox.showwarning("Arquivo repetido", "Este arquivo ja foi importado nesta secao.")
             return
+
+        turno = self.turno_var.get()
+        hora_ini = None
+        hora_fim = None
+        if turno in ("T1", "T2"):
+            hora_ini, hora_fim = self._ask_time_range(turno)
+            if hora_ini is None:
+                return
+
         self.progress.pack(fill="x", pady=(0, 10))
         self.progress.start(10)
 
         def worker():
             try:
-                result = parse_restaurante_pagbank_csv(path)
+                transactions = read_restaurante_transactions(path)
+                if hora_ini and hora_fim:
+                    transactions = [
+                        t for t in transactions
+                        if t["dt"] and hora_ini <= t["dt"].time() <= hora_fim
+                    ]
+                if not transactions:
+                    self.after(0, lambda: self._import_failed(
+                        "Nenhuma transacao encontrada no intervalo informado."
+                    ))
+                    return
+                result = aggregate_transactions(transactions)
                 self.after(0, lambda: self._apply_pagbank_import(path, result))
             except Exception as exc:
                 self.after(0, lambda: self._import_failed(str(exc)))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _import_with_split(self) -> None:
-        cutoff = self.split_time_var.get().strip()
-        if not cutoff:
-            messagebox.showwarning("Horario obrigatorio", "Informe o horario de fechamento do 1° turno (HH:MM).")
-            return
-        try:
-            from datetime import datetime
-            datetime.strptime(cutoff, "%H:%M")
-        except ValueError:
-            messagebox.showwarning("Horario invalido", f"Formato invalido: {cutoff!r}. Use HH:MM (ex: 15:00).")
-            return
+    def _ask_time_range(self, turno: str) -> tuple:
+        dialog = tk.Toplevel(self)
+        dialog.title(f"Horario de Importacao - {turno}")
+        dialog.resizable(False, False)
+        dialog.transient(self)
 
-        path = filedialog.askopenfilename(filetypes=[("CSV", "*.csv"), ("Todos", "*.*")])
-        if not path:
-            return
-        if self.imported_paths.get("pagbank") == path:
-            messagebox.showwarning("Arquivo repetido", "Este arquivo ja foi importado nesta secao.")
-            return
-        self.progress.pack(fill="x", pady=(0, 10))
-        self.progress.start(10)
+        frame = ttk.Frame(dialog, padding=20)
+        frame.pack()
 
-        def worker():
+        ttk.Label(frame, text=f"{turno} - Informe o intervalo de horario:", font=("", 11, "bold")).pack(pady=(0, 12))
+
+        ini_frame = ttk.Frame(frame)
+        ini_frame.pack(fill="x", pady=4)
+        ttk.Label(ini_frame, text="Horario Inicial (hh:mm)").pack(side="left")
+        ini_var = tk.StringVar(value="")
+        ini_entry = ttk.Entry(ini_frame, textvariable=ini_var, width=8)
+        ini_entry.pack(side="left", padx=8)
+
+        fim_frame = ttk.Frame(frame)
+        fim_frame.pack(fill="x", pady=4)
+        ttk.Label(fim_frame, text="Horario Final (hh:mm)").pack(side="left")
+        fim_var = tk.StringVar(value="")
+        fim_entry = ttk.Entry(fim_frame, textvariable=fim_var, width=8)
+        fim_entry.pack(side="left", padx=8)
+
+        def _validate_hhmm(var):
+            def _on_key(*_args):
+                val = var.get()
+                filtered = "".join(c for c in val if c.isdigit() or c == ":")
+                if len(filtered) == 2 and ":" not in filtered[:2]:
+                    filtered = filtered[:2] + ":"
+                filtered = filtered[:5]
+                if filtered != val:
+                    var.set(filtered)
+            return _on_key
+
+        ini_var.trace_add("write", _validate_hhmm(ini_var))
+        fim_var.trace_add("write", _validate_hhmm(fim_var))
+
+        result = {"ini": None, "fim": None}
+
+        def _confirm():
+            ini = ini_var.get().strip()
+            fim = fim_var.get().strip()
             try:
-                first_tx, second_tx = split_transactions_by_time(path, cutoff)
-                self.after(0, lambda: self._apply_split_import(path, first_tx, second_tx, cutoff))
-            except Exception as exc:
-                self.after(0, lambda: self._import_failed(str(exc)))
+                ini_t = datetime.strptime(ini, "%H:%M").time()
+                fim_t = datetime.strptime(fim, "%H:%M").time()
+            except ValueError:
+                messagebox.showwarning("Formato invalido", "Informe os horarios no formato hh:mm (ex: 08:00).", parent=dialog)
+                return
+            if ini_t > fim_t:
+                messagebox.showwarning("Intervalo invalido", "O horario inicial deve ser menor que o final.", parent=dialog)
+                return
+            result["ini"] = ini_t
+            result["fim"] = fim_t
+            dialog.destroy()
 
-        threading.Thread(target=worker, daemon=True).start()
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(pady=(12, 0))
+        ttk.Button(btn_frame, text="Confirmar", command=_confirm).pack(side="left", padx=4)
+        ttk.Button(btn_frame, text="Cancelar", command=dialog.destroy).pack(side="left", padx=4)
+
+        ini_entry.focus_set()
+        dialog.grab_set()
+        dialog.wait_window()
+        return result["ini"], result["fim"]
 
     def _apply_pagbank_import(self, path: str, result: dict) -> None:
         self.progress.stop()
@@ -311,76 +378,17 @@ class ImportRestauranteFrame(ttk.Frame):
         self.imported_paths["pagbank"] = path
         incoming = result["categorias"]
         for key in CATEGORIAS_RESTAURANTE:
+            if key == "DINHEIRO":
+                continue
             value = round(float((incoming.get(key) or {}).get("real", 0) or 0), 2)
             if value:
                 self.caixa["categorias"][key]["real"] = value
             self.real_labels[key].set(format_money(value) if value else "")
             self._refresh_diff(key)
+        self._sync_dinheiro_real()
+        self._refresh_total_diff()
         summary = f"{result['registros_aprovados']} registros aprovados agrupados."
         self.pagbank_status.set(summary)
-
-    def _apply_split_import(self, path: str, first_tx: list[dict], second_tx: list[dict], cutoff: str) -> None:
-        self.progress.stop()
-        self.progress.pack_forget()
-
-        if not first_tx or not second_tx:
-            messagebox.showwarning(
-                "Divisao incompleta",
-                f"Nao foi possivel dividir: {len(first_tx)} transacoes no 1° turno, {len(second_tx)} no 2°."
-            )
-            return
-
-        result1 = aggregate_transactions(first_tx)
-        result2 = aggregate_transactions(second_tx)
-
-        base_data = self._collect_raw_date()
-        if not base_data:
-            return
-
-        caixa1 = {
-            "data": base_data,
-            "status": "rascunho",
-            "turno": 1,
-            "categorias": empty_categories_restaurante(),
-            "contagens_dinheiro": [],
-            "lancamentos_avulsos": [],
-            "observacoes": f"1° turno (ate {cutoff})",
-        }
-        caixa2 = {
-            "data": base_data,
-            "status": "rascunho",
-            "turno": 2,
-            "categorias": empty_categories_restaurante(),
-            "contagens_dinheiro": [],
-            "lancamentos_avulsos": [],
-            "observacoes": f"2° turno (apos {cutoff})",
-        }
-
-        for key in CATEGORIAS_RESTAURANTE:
-            caixa1["categorias"][key]["real"] = round(
-                float((result1["categorias"].get(key) or {}).get("real", 0) or 0), 2
-            )
-            caixa2["categorias"][key]["real"] = round(
-                float((result2["categorias"].get(key) or {}).get("real", 0) or 0), 2
-            )
-
-        self.app.repo_restaurante.save(caixa2)
-        self.imported_paths["pagbank"] = path
-        self.caixa = deepcopy(caixa1)
-        self.caixa["id"] = str(uuid4())
-
-        for key in CATEGORIAS_RESTAURANTE:
-            v_real = caixa1["categorias"][key]["real"]
-            self.sistema_vars[key].set("")
-            self.real_labels[key].set(format_money(v_real) if v_real else "")
-            self._refresh_diff(key)
-        self.caixa["categorias"] = caixa1["categorias"]
-
-        self.title_var.set(f"Caixa em Edicao - Turno 1 (ate {cutoff})")
-        self.pagbank_status.set(
-            f"1° turno: {result1['registros_aprovados']} registros | "
-            f"2° turno salvo como rascunho: {result2['registros_aprovados']} registros."
-        )
 
     def _import_failed(self, message: str) -> None:
         self.progress.stop()
@@ -393,9 +401,13 @@ class ImportRestauranteFrame(ttk.Frame):
             return
         self.imported_paths.pop("pagbank", None)
         for key in CATEGORIAS_RESTAURANTE:
+            if key == "DINHEIRO":
+                continue
             self.caixa["categorias"][key]["real"] = 0.0
             self.real_labels[key].set("")
             self._refresh_diff(key)
+        self._sync_dinheiro_real()
+        self._refresh_total_diff()
         self.pagbank_status.set("Nenhum arquivo importado.")
 
     def _apply_sistema(self, key: str) -> None:
@@ -415,6 +427,30 @@ class ImportRestauranteFrame(ttk.Frame):
         sistema = self.caixa["categorias"][key].get("sistema", 0) or 0
         diff = round(real - sistema, 2)
         self.diff_labels[key].set(format_money(diff) if diff else ("-" if real or sistema else ""))
+        self._refresh_total_diff()
+
+    def _refresh_total_diff(self) -> None:
+        total = 0.0
+        for key in CATEGORIAS_RESTAURANTE:
+            real = self.caixa["categorias"][key].get("real", 0) or 0
+            sistema = self.caixa["categorias"][key].get("sistema", 0) or 0
+            total += round(real - sistema, 2)
+        self.total_diff_var.set(format_money(round(total, 2)))
+        if abs(total) < 0.005:
+            self.total_diff_label.configure(foreground="#198754")
+        else:
+            self.total_diff_label.configure(foreground="#dc3545")
+
+    def _sync_dinheiro_real(self) -> None:
+        contagens = self.count_frame.get_counts()
+        geral = next((c for c in contagens if c.get("label") == "Geral"), None)
+        dinheiro_real = round(geral.get("total", 0) if geral else 0, 2)
+        self.caixa["categorias"]["DINHEIRO"]["real"] = dinheiro_real
+        self.real_labels["DINHEIRO"].set(format_money(dinheiro_real) if dinheiro_real else "")
+        self._refresh_diff("DINHEIRO")
+
+    def _on_contagem_change(self) -> None:
+        self._sync_dinheiro_real()
 
     def _collect_raw_date(self) -> str | None:
         try:
@@ -436,7 +472,10 @@ class ImportRestauranteFrame(ttk.Frame):
             self.caixa["data"] = date_to_iso(parsed)
             self.caixa["status"] = status
             self.caixa["contagens_dinheiro"] = self.count_frame.get_counts()
+            turno_str = self.turno_var.get()
+            self.caixa["turno"] = 1 if turno_str == "T1" else (2 if turno_str == "T2" else None)
             self.caixa["lancamentos_avulsos"] = self._collect_avulsos()
+            self._sync_dinheiro_real()
             return True
         except Exception as exc:
             messagebox.showerror("Dados invalidos", str(exc))
@@ -468,12 +507,6 @@ class ImportRestauranteFrame(ttk.Frame):
         else:
             self.nova_cat_row.pack_forget()
             self.avulso_nova_var.set("")
-
-    def _on_split_toggle(self) -> None:
-        if self.split_var.get():
-            self.split_time_entry.pack(side="left", padx=6)
-        else:
-            self.split_time_entry.pack_forget()
 
     def _add_avulso(self) -> None:
         if self.readonly:

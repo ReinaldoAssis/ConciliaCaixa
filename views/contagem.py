@@ -10,12 +10,13 @@ from utils import copy_image_to_clipboard, format_money, parse_money, serials_va
 
 
 class MoneyCountFrame(ttk.LabelFrame):
-    def __init__(self, master, readonly: bool = False):
+    def __init__(self, master, readonly: bool = False, on_change=None):
         super().__init__(master, text="Contagem de Dinheiro", padding=10)
         self.readonly = readonly
         self.caixa_data: str = ""
         self.counts: list[dict] = []
         self.geral_editado: bool = False
+        self.on_change = on_change
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True)
 
@@ -66,7 +67,7 @@ class MoneyCountFrame(ttk.LabelFrame):
         moedas_var = tk.StringVar(value="0")
         frame.moedas_var = moedas_var
         frame.depositos_var = tk.StringVar(value="0")
-        frame.count_total_var = tk.StringVar(value=format_money(0))
+        frame.count_total_var = tk.StringVar(value=f"Total: {format_money(0)} (Moedas: {format_money(0)})")
         ttk.Label(grid, text="Moedas").grid(row=8, column=0, sticky="w", padx=4, pady=2)
         ttk.Entry(grid, textvariable=moedas_var, width=10, state="readonly").grid(
             row=8, column=2, sticky="w", padx=4, pady=2
@@ -148,7 +149,7 @@ class MoneyCountFrame(ttk.LabelFrame):
         frame.moedas_var = moedas_var
         depositos_str = str((existing or {}).get("depositos", "0")).replace(".", ",")
         frame.depositos_var = tk.StringVar(value=depositos_str)
-        frame.count_total_var = tk.StringVar(value=format_money((existing or {}).get("total", 0)))
+        frame.count_total_var = tk.StringVar(value=f"Total: {format_money((existing or {}).get('total', 0))} (Moedas: {format_money((existing or {}).get('moedas', 0))})")
         ttk.Label(grid, text="Moedas").grid(row=8, column=0, sticky="w", padx=4, pady=2)
         ttk.Entry(grid, textvariable=moedas_var, width=10, state="readonly" if self.readonly else "normal").grid(
             row=8, column=2, sticky="w", padx=4, pady=2
@@ -260,10 +261,12 @@ class MoneyCountFrame(ttk.LabelFrame):
             pass
         self._sync_serials(frame, qty_200)
         data = self._collect_tab(frame)
-        frame.count_total_var.set(f"Total: {format_money(data['total'])}")
+        frame.count_total_var.set(f"Total: {format_money(data['total'])} (Moedas: {format_money(data['moedas'])})")
         if frame is not self.geral_frame:
             self._refresh_geral()
         self._refresh_total()
+        if self.on_change:
+            self.on_change()
 
     def _sync_serials(self, frame, qty_200: int) -> None:
         while len(frame.serial_vars) < qty_200:
@@ -305,7 +308,7 @@ class MoneyCountFrame(ttk.LabelFrame):
         self.geral_frame.moedas_var.set(str(total_moedas).replace(".", ","))
         self.geral_frame.depositos_var.set(str(total_depositos).replace(".", ","))
         grand = sum(total_notes[str(d)] * d for d in DENOMINATIONS) + total_moedas + total_depositos
-        self.geral_frame.count_total_var.set(f"Total: {format_money(round(grand, 2))}")
+        self.geral_frame.count_total_var.set(f"Total: {format_money(round(grand, 2))} (Moedas: {format_money(round(total_moedas, 2))})")
         for child in self.geral_frame.serial_box.winfo_children():
             child.destroy()
         if all_serials:
@@ -324,7 +327,9 @@ class MoneyCountFrame(ttk.LabelFrame):
             subtotal_var.set(format_money(int(notes.get(str(d), 0) or 0) * d))
         self.geral_frame.moedas_var.set(str(count.get("moedas", "0")).replace(".", ","))
         self.geral_frame.depositos_var.set(str(count.get("depositos", "0")).replace(".", ","))
-        self.geral_frame.count_total_var.set(f"Total: {format_money(count.get('total', 0))}")
+        self.geral_frame.count_total_var.set(
+            f"Total: {format_money(count.get('total', 0))} (Moedas: {format_money(count.get('moedas', 0))})"
+        )
         for child in self.geral_frame.serial_box.winfo_children():
             child.destroy()
         serials = count.get("seriais_200", [])
@@ -404,6 +409,8 @@ class MoneyCountFrame(ttk.LabelFrame):
     def _refresh_total(self) -> None:
         geral = self._collect_geral()
         self.total_var.set(format_money(geral["total"]))
+        if self.on_change:
+            self.on_change()
 
     def _copy_image(self) -> None:
         try:

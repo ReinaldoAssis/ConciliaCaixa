@@ -52,6 +52,7 @@ class ResultFrame(ttk.Frame):
         for item in self.tree.get_children():
             self.tree.delete(item)
         avulsos = self.caixa.get("lancamentos_avulsos") or []
+        total_diff = 0.0
         for index, row in enumerate(build_conciliation_rows(self.caixa.get("categorias", {}), avulsos)):
             tag = "ok" if row["status"] == "OK" else "bad"
             self.tree.insert(
@@ -66,6 +67,12 @@ class ResultFrame(ttk.Frame):
                 ),
                 tags=(tag,),
             )
+            total_diff += float(row["diferenca"])
+        footer_row = (
+            "Diferença Total:", "", "", format_money(round(total_diff, 2)), "",
+        )
+        tag = "ok" if abs(total_diff) < 0.005 else "bad"
+        self.tree.insert("", "end", values=footer_row, tags=(tag,))
         self.info_var.set(
             "\n".join(
                 [
