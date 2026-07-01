@@ -28,9 +28,20 @@ def _rows_from_xls(path: str | Path) -> list[dict[str, object]]:
     try:
         import xlrd
     except ImportError as exc:
-        raise RuntimeError("A dependencia xlrd nao esta instalada. Execute: pip install -r requirements.txt") from exc
+        raise RuntimeError(
+            "A dependencia xlrd nao esta disponivel no executavel.\n"
+            "Execute: pip install -r requirements.txt\n"
+            f"Erro original: {exc}"
+        ) from exc
 
-    book = xlrd.open_workbook(path)
+    try:
+        book = xlrd.open_workbook(path)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Erro ao abrir o arquivo Premmia com xlrd.\n"
+            f"Erro original: {exc}\n"
+            f"Submodulos xlrd disponiveis: {[m for m in dir(xlrd) if not m.startswith('_')]}"
+        ) from exc
     if "Conferência" in book.sheet_names():
         sheet = book.sheet_by_name("Conferência")
     elif "Conferencia" in book.sheet_names():
